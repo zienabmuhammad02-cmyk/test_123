@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Speech to Text (English/Arabic) - Working Demo</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; background:#f6f7fb; color:#0f172a; }
+    header { background:#0f172a; color:#fff; padding:16px 18px; }
+    header h1 { margin:0; font-size:18px; }
+    header p { margin:6px 0 0; color:#cbd5e1; font-size:13px; }
+    main { max-width: 900px; margin: 0 auto; padding: 16px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; padding: 16px; margin: 14px 0; box-shadow:0 6px 18px rgba(15,23,42,.06); }
+    .row { display:flex; flex-wrap: wrap; gap: 10px; align-items:center; }
+    textarea { width:100%; min-height: 160px; resize: vertical; padding: 12px; border-radius: 12px; border:1px solid #e5e7eb; font-size: 14px; }
+    select { padding: 10px; border-radius: 12px; border:1px solid #e5e7eb; }
+    button {
+      border:0; border-radius: 12px; padding: 10px 14px;
+      background:#1f2937; color:#fff; cursor:pointer; font-size: 14px;
+    }
+    button.primary { background:#10b981; color:#052e2b; font-weight: 700; }
+    button:disabled { opacity: .55; cursor:not-allowed; }
+    .status { color:#334155; font-size: 13px; }
+    .hint { color:#64748b; font-size: 13px; margin-top:10px; }
+    .error { color:#b91c1c; font-size: 13px; margin-top:10px; white-space: pre-wrap; }
+    code { background:#f1f5f9; padding: 2px 6px; border-radius: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Speech to Text — Textarea + Record Button</h1>
+    <p>Best on <b>Chrome/Edge desktop</b>. Serve via <code>http://localhost</code> or HTTPS.</p>
+  </header>
+
+  <main>
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="status">Language</div>
+          <select id="lang">
+            <option value="en-US">English (en-US)</option>
+            <option value="ar-SA">Arabic (ar-SA)</option>
+            <option value="ar-EG">Arabic (ar-EG)</option>
+          </select>
+        </div>
+
+        <button id="start" class="primary" type="button">Start recording</button>
+        <button id="stop" type="button" disabled>Stop</button>
+
+        <div id="status" class="status">Status: idle</div>
+      </div>
+
+      <div style="margin-top:12px;">
+        <textarea id="output" placeholder="Speech will be converted to text here..."></textarea>
+      </div>
+
+      <div class="hint" id="support"></div>
+      <div class="error" id="err"></div>
+    </div>
+  </main>
+
+  <script>
+    const langEl = document.getElementById("lang");
+    const startBtn = document.getElementById("start");
+    const stopBtn = document.getElementById("stop");
+    const statusEl = document.getElementById("status");
+    const outputEl = document.getElementById("output");
+    const supportEl = document.getElementById("support");
+    const errEl = document.getElementById("err");
+
+    function setStatus(s) { statusEl.textContent = "Status: " + s; }
+    function setErr(s) { errEl.textContent = s ? ("Error: " + s) : ""; }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    supportEl.textContent =
+      "SpeechRecognition support: " + (SpeechRecognition ? "YES" : "NO") +
+      " | Protocol: " + location.protocol;
+
+    if (!SpeechRecognition) {
+      setStatus("not supported in this browser");
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+      setErr("Use Chrome or Microsoft Edge on desktop. Firefox/Safari often do not support this API.");
+      throw new Error("SpeechRecognition not supported");
+    }
+
+    // More reliable config
+    const rec = new SpeechRecognition();
+    rec.continuous = false;       // more reliable than continuous across devices
+    rec.interimResults = true;    // show partial
+    rec.maxAlternatives = 1;
+
+    let finalText = "";
+
+    rec.onstart = () => {
+      setErr("");
+      setStatus("listening... speak now");
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+    };
+
+    rec.onend = () => {
+      setStatus("stopped");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    };
+
+    rec.onerror = (e) => {
+      // Common errors: not-allowed, service-not-allowed, network, no-speech, audio-capture
+      setStatus("error");
+      setErr(e.error || "unknown error");
+
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setErr((e.error || "") + "\nAllow microphone permission for this site, then try again.");
+      } else if (e.error === "audio-capture") {
+        setErr("audio-capture\nNo microphone found or it is blocked by the OS.");
+      } else if (e.error === "network") {
+        setErr("network\nSpeech service not reachable. Try again, or test on another network/browser.");
+      } else if (e.error === "no-speech") {
+        setErr("no-speech\nNo speech detected. Click Start and speak clearly.");
+      }
+    };
+
+    rec.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const res = event.results[i];
+        const txt = res[0].transcript;
+        if (res.isFinal) finalText += txt + " ";
+        else interim += txt;
+      }
+      outputEl.value = finalText + interim;
+    };
+
+    startBtn.addEventListener("click", async () => {
+      setErr("");
+      rec.lang = langEl.value;
+
+      // Optional: ask mic permission explicitly (helps debugging)
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        setStatus("mic permission blocked");
+        setErr((e && e.name ? e.name : "PermissionError") + "\nAllow microphone access for this site.");
+        return;
+      }
+
+      // Keep existing textarea content, append new dictated text
+      finalText = outputEl.value ? outputEl.value.trim() + " " : "";
+
+      try {
+        rec.start(); // must be triggered by user gesture
+      } catch (e) {
+        setErr("Could not start recognition (maybe already started). Try Stop then Start.");
+      }
+    });
+
+    stopBtn.addEventListener("click", () => {
+      try { rec.stop(); } catch (e) {}
+    });
+
+    setStatus("idle");
+  </script>
+</body>
+</html>

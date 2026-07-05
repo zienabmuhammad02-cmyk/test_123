@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auto Speak Selected Text (English + Arabic) - Free Demo</title>
+  <style>
+    body { margin:0; font-family: Arial, sans-serif; line-height:1.6; background:#f6f7fb; color:#0f172a; }
+    header { background:#0f172a; color:#fff; padding:16px 18px; }
+    header h1 { margin:0; font-size:18px; }
+    header p { margin:6px 0 0; color:#cbd5e1; font-size:13px; }
+    main { max-width: 980px; margin: 0 auto; padding: 16px; }
+    .card { background:#fff; border:1px solid #e5e7eb; border-radius: 14px; padding: 16px; margin: 14px 0; box-shadow:0 6px 18px rgba(15,23,42,.06); }
+    .rtl { direction: rtl; }
+    .badge {
+      position:fixed; right:16px; bottom:16px; z-index:99999;
+      background:#111827; color:#e5e7eb; border:1px solid #334155;
+      padding:10px 12px; border-radius: 12px; font-size: 12px;
+      max-width: 320px;
+    }
+    .badge strong { color:#fff; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Auto Text-to-Speech from Selection (English + Arabic)</h1>
+    <p>
+      Select text anywhere on the page and it will speak automatically.
+      If your browser blocks audio, click once on the page to enable speech.
+    </p>
+  </header>
+
+  <main>
+    <div class="card">
+      <h2>English text</h2>
+      <p>
+        Select any part of this paragraph. The page will automatically read the selected text out loud.
+        Selecting new text will stop the previous speech and start the new one.
+      </p>
+      <p>
+        This uses the browser Web Speech API, so it is free and needs no backend.
+      </p>
+    </div>
+
+    <div class="card rtl">
+      <h2>نص عربي</h2>
+      <p>
+        قم بتحديد أي جزء من هذا النص وسيقوم الموقع بقراءته تلقائيًا.
+        عند تحديد نص جديد سيتم إيقاف القراءة السابقة وبدء قراءة النص الجديد.
+      </p>
+    </div>
+
+    <div class="card">
+      <h2>Mixed example</h2>
+      <p>
+        Arabic: مرحباً بك في الموقع. English: Welcome to the website.
+      </p>
+    </div>
+  </main>
+
+  <div class="badge" id="badge">
+    <strong>Status:</strong> waiting for first click/tap to enable speech
+  </div>
+
+  <script>
+    const badge = document.getElementById("badge");
+
+    let armed = false;          // becomes true after first user gesture (for autoplay policies)
+    let lastSpoken = "";        // avoid repeating the same selection
+    let debounceTimer = null;
+
+    function setStatus(text) {
+      badge.innerHTML = "<strong>Status:</strong> " + text;
+    }
+
+    function isArabic(text) {
+      return /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(text);
+    }
+
+    function getSelectedText() {
+      const sel = window.getSelection ? window.getSelection() : null;
+      if (!sel) return "";
+      return (sel.toString() || "").trim();
+    }
+
+    function selectionIsInEditableField() {
+      const active = document.activeElement;
+      if (!active) return false;
+      const tag = (active.tagName || "").toLowerCase();
+      if (tag === "input" || tag === "textarea") return true;
+      if (active.isContentEditable) return true;
+      return false;
+    }
+
+    function pickVoice(langPrefix) {
+      const voices = window.speechSynthesis.getVoices() || [];
+      // try language match
+      let v = voices.find(v => (v.lang || "").toLowerCase().startsWith(langPrefix));
+      if (v) return v;
+
+      // fallback by name hints (varies by OS)
+      const hint = langPrefix === "ar" ? /(arab|arabic)/i : /(english|en)/i;
+      v = voices.find(v => hint.test(v.name || ""));
+      return v || null;
+    }
+
+    function speak(text) {
+      // stop previous
+      window.speechSynthesis.cancel();
+
+      const u = new SpeechSynthesisUtterance(text);
+      const langPrefix = isArabic(text) ? "ar" : "en";
+      u.lang = langPrefix === "ar" ? "ar-SA" : "en-US";
+
+      const voice = pickVoice(langPrefix);
+      if (voice) u.voice = voice;
+
+      u.rate = 1;
+      u.pitch = 1;
+      u.volume = 1;
+
+      u.onend = () => setStatus("idle (select text to speak)");
+      u.onerror = () => setStatus("error speaking (try selecting again)");
+
+      setStatus("speaking...");
+      window.speechSynthesis.speak(u);
+    }
+
+    function handleSelectionChange() {
+      // Don’t speak while user is typing/selecting inside inputs/editable areas
+      if (selectionIsInEditableField()) return;
+
+      const text = getSelectedText();
+      if (!text) return;
+
+      // If not armed yet, show guidance (many browsers require a click/tap first)
+      if (!armed) {
+        setStatus("blocked by browser until you click/tap once, then select text again");
+        return;
+      }
+
+      // Debounce: wait for the user to finish adjusting selection
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        const finalText = getSelectedText();
+        if (!finalText) return;
+
+        // Avoid repeating same selection
+        if (finalText === lastSpoken) return;
+        lastSpoken = finalText;
+
+        speak(finalText);
+      }, 350);
+    }
+
+    // Arm TTS after first user gesture (click/tap/keydown)
+    function armOnce() {
+      armed = true;
+      setStatus("armed (select text to speak)");
+      window.removeEventListener("pointerdown", armOnce, true);
+      window.removeEventListener("keydown", armOnce, true);
+
+      // Touch Chrome/Safari sometimes needs voices to be initialized after gesture
+      window.speechSynthesis.getVoices();
+    }
+
+    window.addEventListener("pointerdown", armOnce, true);
+    window.addEventListener("keydown", armOnce, true);
+
+    // Load voices async (Chrome)
+    window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+
+    // Auto speak on selection change
+    document.addEventListener("selectionchange", handleSelectionChange);
+
+    setStatus("waiting for first click/tap to enable speech");
+  </script>
+</body>
+</html>
